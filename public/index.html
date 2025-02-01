@@ -1,0 +1,443 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Monitor</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        :root {
+            --primary-bg: #1a1b1e;
+            --secondary-bg: #2c2e33;
+            --card-bg: #26282d;
+            --success-color: #4caf50;
+            --error-color: #f44336;
+            --text-primary: #ffffff;
+            --text-secondary: #9ea0a5;
+            --border-color: #3f4147;
+            --section-header: #3d4048;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            background: var(--primary-bg);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 1rem;
+        }
+
+        .header {
+            background: var(--secondary-bg);
+            padding: 1rem;
+            margin-bottom: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        h1, h2, h3 {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .dashboard {
+            display: grid;
+            gap: 2rem;
+        }
+
+        .section-group {
+            background: var(--secondary-bg);
+            border-radius: 12px;
+            padding: 1.5rem;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+
+        .section-header {
+            background: var(--section-header);
+            margin: -1.5rem -1.5rem 1.5rem -1.5rem;
+            padding: 1rem 1.5rem;
+            border-radius: 12px 12px 0 0;
+            font-size: 1.2rem;
+            font-weight: 500;
+        }
+
+        .device-grid {
+            display: grid;
+            gap: 1rem;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        }
+
+        .device-card {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 1rem;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .device-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        }
+
+        .device-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.5rem;
+        }
+
+        .device-name {
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .device-details {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .device-details div {
+            margin: 0.25rem 0;
+        }
+
+        .status-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+
+        .online {
+            background: var(--success-color);
+            box-shadow: 0 0 8px var(--success-color);
+        }
+
+        .offline {
+            background: var(--error-color);
+            box-shadow: 0 0 8px var(--error-color);
+        }
+
+        .discovered-section {
+            margin-top: 2rem;
+            background: var(--secondary-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            padding: 1.5rem;
+        }
+
+        .table-wrapper {
+            margin: 0 -1.5rem -1.5rem -1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: var(--section-header);
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        tr:hover {
+            background: var(--card-bg);
+        }
+
+        .sort-header {
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .sort-header:hover {
+            background: var(--card-bg);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 0.5rem;
+            }
+
+            .device-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .hide-mobile {
+                display: none;
+            }
+
+            th, td {
+                padding: 0.75rem;
+                font-size: 0.9rem;
+            }
+        }
+
+        .filter-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .filter-btn {
+            background: var(--card-bg);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover {
+            background: var(--section-header);
+        }
+
+        .filter-btn.active {
+            background: var(--section-header);
+            border-color: var(--text-primary);
+        }
+
+        .device-card.hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Network Monitor</h1>
+            <div class="filter-buttons">
+                <button class="filter-btn active" data-filter="all">All Devices</button>
+                <button class="filter-btn" data-filter="online">Online</button>
+                <button class="filter-btn" data-filter="offline">Offline</button>
+            </div>
+        </div>
+        
+        <div class="dashboard" id="monitored-devices">
+            <!-- Sections will be inserted here -->
+        </div>
+
+        <div class="discovered-section">
+            <div class="section-header">
+                <h2>Discovered Devices</h2>
+            </div>
+            <div class="table-wrapper">
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="sort-header" data-sort="ip">IP Address</th>
+                            <th class="sort-header hide-mobile" data-sort="hostname">Hostname</th>
+                            <th class="sort-header hide-mobile" data-sort="mac">MAC</th>
+                            <th class="sort-header hide-mobile" data-sort="first_seen">First Seen</th>
+                            <th class="sort-header" data-sort="last_seen">Last Seen</th>
+                            <th class="sort-header" data-sort="isAlive">Status</th>
+                        </tr>
+                    </thead>
+                    <tbody id="discovered-devices"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const socket = io();
+        const monitoredDevices = {};
+        const discoveredDevices = {};
+        let currentSort = { field: 'ip', reverse: false };
+        let currentFilter = 'all';
+
+        function formatDate(dateString) {
+            if (!dateString) return 'Never';
+            const date = new Date(dateString);
+            return date.toLocaleString();
+        }
+
+        function sortDevices(devices, field, reverse) {
+            return devices.sort((a, b) => {
+                let comparison;
+                if (field === 'ip') {
+                    // Split IP addresses into their numeric components
+                    const aparts = a.ip.split('.').map(Number);
+                    const bparts = b.ip.split('.').map(Number);
+                    for (let i = 0; i < 4; i++) {
+                        if (aparts[i] !== bparts[i]) {
+                            comparison = aparts[i] - bparts[i];
+                            break;
+                        }
+                    }
+                } else if (field === 'isAlive') {
+                    // Sort by online/offline status
+                    comparison = (b.isAlive ? 1 : 0) - (a.isAlive ? 1 : 0);
+                } else {
+                    // Sort dates and other fields
+                    comparison = a[field] < b[field] ? -1 : (a[field] > b[field] ? 1 : 0);
+                }
+                return reverse ? -comparison : comparison;
+            });
+        }
+
+        function renderMonitoredDevices() {
+            const container = document.getElementById('monitored-devices');
+            
+            // Create HTML for each section
+            const sectionsHtml = Object.entries(monitoredDevices).map(([section, devices]) => `
+                <div class="section-group">
+                    <div class="section-header">
+                        <h2>${section}</h2>
+                    </div>
+                    <div class="device-grid">
+                        ${Object.values(devices).map(device => `
+                            <div class="device-card">
+                                <div class="device-header">
+                                    <span class="device-name">
+                                        <span class="status-dot ${device.isAlive ? 'online' : 'offline'}"></span>
+                                        ${device.name}
+                                    </span>
+                                    <span>${device.isAlive ? 'Online' : 'Offline'}</span>
+                                </div>
+                                <div class="device-details">
+                                    <div>IP: ${device.ip}</div>
+                                    <div>Type: ${device.type.toUpperCase()}</div>
+                                    ${device.time ? `<div>Response: ${device.time}ms</div>` : ''}
+                                    ${device.statusCode ? `<div>Status: ${device.statusCode}</div>` : ''}
+                                    ${device.error ? `<div class="error">Error: ${device.error}</div>` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `).join('');
+
+            container.innerHTML = sectionsHtml;
+            applyFilter();
+        }
+
+        function renderDiscoveredDevices() {
+            const container = document.getElementById('discovered-devices');
+            const devices = Object.values(discoveredDevices);
+            const sortedDevices = sortDevices(devices, currentSort.field, currentSort.reverse);
+            
+            container.innerHTML = sortedDevices.map(device => `
+                <tr>
+                    <td>
+                        <span class="status-dot ${device.isAlive ? 'online' : 'offline'}"></span>
+                        ${device.ip}
+                    </td>
+                    <td class="hide-mobile">${device.hostname || '-'}</td>
+                    <td class="hide-mobile">${device.mac || '-'}</td>
+                    <td class="hide-mobile">${formatDate(device.first_seen)}</td>
+                    <td>${formatDate(device.last_seen)}</td>
+                    <td>${device.isAlive ? 'Online' : 'Offline'}</td>
+                </tr>
+            `).join('');
+            
+            // Update sort headers
+            document.querySelectorAll('.sort-header').forEach(header => {
+                const field = header.dataset.sort;
+                header.classList.toggle('active', field === currentSort.field);
+                header.classList.toggle('reverse', field === currentSort.field && currentSort.reverse);
+            });
+        }
+
+        // Add click handlers for sort headers
+        document.querySelectorAll('.sort-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const field = header.dataset.sort;
+                if (currentSort.field === field) {
+                    currentSort.reverse = !currentSort.reverse;
+                } else {
+                    currentSort.field = field;
+                    currentSort.reverse = false;
+                }
+                renderDiscoveredDevices();
+            });
+        });
+
+        function applyFilter() {
+            const cards = document.querySelectorAll('.device-card');
+            cards.forEach(card => {
+                const isOnline = card.querySelector('.status-dot').classList.contains('online');
+                card.classList.remove('hidden');
+                
+                if (currentFilter === 'online' && !isOnline) {
+                    card.classList.add('hidden');
+                } else if (currentFilter === 'offline' && isOnline) {
+                    card.classList.add('hidden');
+                }
+            });
+        }
+
+        // Add click handlers for filter buttons
+        document.querySelectorAll('.filter-btn').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                currentFilter = button.dataset.filter;
+                applyFilter();
+            });
+        });
+
+        socket.on('deviceUpdate', (device) => {
+            if (!monitoredDevices[device.section]) {
+                monitoredDevices[device.section] = {};
+            }
+            monitoredDevices[device.section][device.ip] = {
+                ...device,
+                timestamp: new Date().toISOString()
+            };
+            renderMonitoredDevices();
+        });
+
+        socket.on('discoveredDevice', (device) => {
+            discoveredDevices[device.ip] = device;
+            renderDiscoveredDevices();
+        });
+
+        socket.on('initialData', (data) => {
+            // Clear existing data
+            Object.keys(monitoredDevices).forEach(key => delete monitoredDevices[key]);
+            Object.keys(discoveredDevices).forEach(key => delete discoveredDevices[key]);
+
+            // Process monitored devices
+            data.monitored.forEach(device => {
+                if (!monitoredDevices[device.section]) {
+                    monitoredDevices[device.section] = {};
+                }
+                monitoredDevices[device.section][device.ip] = device;
+            });
+
+            // Process discovered devices
+            data.discovered.forEach(device => {
+                discoveredDevices[device.ip] = device;
+            });
+
+            renderMonitoredDevices();
+            renderDiscoveredDevices();
+        });
+    </script>
+</body>
+</html> 
