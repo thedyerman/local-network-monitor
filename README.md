@@ -149,5 +149,5 @@ This project is licensed under the **MIT License**.
 Feel free to submit pull requests or report issues!
 
 ## Contact
-For support, contact [your email or GitHub link].
+For any questions, contact me kc|at|dyertech.ca.
 
