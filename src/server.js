@@ -13,9 +13,70 @@ const app = express();
 const server = http.createServer(app);
 const io = socketIo(server);
 
+// Create metrics app if a separate metrics port is configured
+const metricsApp = config.metricsPort ? express() : null;
+const metricsServer = metricsApp ? http.createServer(metricsApp) : null;
+
 let monitoringInterval;
 let discoveryIntervals = [];
 let isShuttingDown = false;
+
+// Helper function to generate metrics text
+async function generateMetrics() {
+  const devices = await pingService.getAllDevices();
+  let metrics = '# HELP device_online Device online status (1 = online, 0 = offline)\n';
+  metrics += '# TYPE device_online gauge\n';
+  
+  // Add online/offline metrics for all devices
+  for (const device of devices) {
+    // Escape special characters in labels
+    const name = device.name.replace(/"/g, '\\"');
+    const section = device.section.replace(/"/g, '\\"');
+    const type = device.type.replace(/"/g, '\\"');
+    
+    metrics += `device_online{name="${name}",ip="${device.ip}",section="${section}",type="${type}"} ${device.isAlive ? 1 : 0}\n`;
+  }
+  
+  // Add latency metrics for ICMP devices
+  metrics += '\n# HELP device_latency_ms Device ping latency in milliseconds\n';
+  metrics += '# TYPE device_latency_ms gauge\n';
+  
+  for (const device of devices) {
+    if (device.type === 'icmp' && device.time !== null) {
+      const name = device.name.replace(/"/g, '\\"');
+      const section = device.section.replace(/"/g, '\\"');
+      
+      metrics += `device_latency_ms{name="${name}",ip="${device.ip}",section="${section}"} ${device.time}\n`;
+    }
+  }
+  
+  // Add HTTP status code metrics
+  metrics += '\n# HELP device_http_status_code HTTP status code from last check\n';
+  metrics += '# TYPE device_http_status_code gauge\n';
+  
+  for (const device of devices) {
+    if (device.type === 'http' && device.statusCode !== null) {
+      const name = device.name.replace(/"/g, '\\"');
+      const section = device.section.replace(/"/g, '\\"');
+      
+      metrics += `device_http_status_code{name="${name}",ip="${device.ip}",section="${section}"} ${device.statusCode}\n`;
+    }
+  }
+  
+  return metrics;
+}
+
+// Metrics endpoint handler
+async function metricsHandler(req, res) {
+  try {
+    const metrics = await generateMetrics();
+    res.set('Content-Type', 'text/plain');
+    res.send(metrics);
+  } catch (error) {
+    console.error('Error generating metrics:', error);
+    res.status(500).send('Error generating metrics');
+  }
+}
 
 // Serve static files from the public directory
 app.use(express.static('public'));
@@ -24,6 +85,14 @@ app.use(express.static('public'));
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../public/index.html'));
 });
+
+// Metrics endpoint for monitoring systems
+app.get('/metrics', metricsHandler);
+
+// If we have a separate metrics server, add the metrics endpoint to it as well
+if (metricsApp) {
+  metricsApp.get('/metrics', metricsHandler);
+}
 
 // WebSocket connection handling
 io.on('connection', async (socket) => {
@@ -137,6 +206,21 @@ async function cleanup() {
                 resolve();
             }
         });
+        
+        // Close metrics server if running
+        if (metricsServer) {
+            await new Promise((resolve) => {
+                try {
+                    metricsServer.close(() => {
+                        console.log('Metrics server closed');
+                        resolve();
+                    });
+                } catch (err) {
+                    console.log('Error closing metrics server:', err);
+                    resolve();
+                }
+            });
+        }
 
         // Close database connection last
         if (db) {
@@ -199,6 +283,16 @@ async function start() {
                 resolve();
             });
         });
+        
+        // Start the metrics server if configured
+        if (metricsServer) {
+            await new Promise((resolve) => {
+                metricsServer.listen(config.metricsPort, () => {
+                    console.log(`Metrics server running on http://localhost:${config.metricsPort}/metrics`);
+                    resolve();
+                });
+            });
+        }
 
         // Start the initial monitoring cycle
         console.log('Starting initial monitoring cycle...');
